@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# omarchy:summary=Launch VSCode in the focused tmux session's project directory
+# Falls back to a plain `code` (reopens its last window) when no tmux project
+# is focused -- deliberately not $HOME, which would add home as a workspace
+# folder.
+#
+# Bound to SUPER + Z in ~/.config/hypr/bindings.lua. Usually reached through a
+# symlink in ~/.local/bin, so resolve that before locating the repo.
+
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+dir=$("$here/../tmux-project-dir.sh")
+
+if [[ -n $dir ]]; then
+  exec setsid uwsm-app -- code "$dir"
+else
+  exec setsid uwsm-app -- code
+fi

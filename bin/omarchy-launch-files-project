@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# omarchy:summary=Launch Files in the focused tmux session's project directory
+# Falls back to a plain Files window when no tmux project is focused.
+#
+# Bound to SUPER + F in ~/.config/hypr/bindings.lua. Usually reached through a
+# symlink in ~/.local/bin, so resolve that before locating the repo.
+
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+dir=$("$here/../tmux-project-dir.sh")
+
+if [[ -n $dir ]]; then
+  exec setsid uwsm-app -- nautilus --new-window "$dir"
+else
+  exec setsid uwsm-app -- nautilus --new-window
+fi
