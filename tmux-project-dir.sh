@@ -22,7 +22,7 @@ CODE_DIR="${CODE_DIR:-$HOME/code_folder}"
 mode="root"
 [[ ${1:-} == "--pane" ]] && mode="pane"
 
-command -v tmux >/dev/null && command -v hyprctl >/dev/null || exit 1
+for dep in tmux hyprctl jq; do command -v "$dep" >/dev/null || exit 1; done
 
 win_pid=$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty')
 [[ $win_pid =~ ^[0-9]+$ ]] && ((win_pid > 1)) || exit 1

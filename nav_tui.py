@@ -4,9 +4,9 @@
 Shows project cards in a grid. Active sessions are highlighted and sorted to top.
 Click a card or type + Tab to autocomplete, then Enter to open.
 
-Tmux naming convention matches homelab_project:
-  - Session name = folder name (e.g. "homelab_project")
-  - CWD = ~/code_folder/<folder>
+Naming convention, which everything else in this repo keys off:
+  - Session name = folder name (e.g. "my-project")
+  - CWD = $CODE_DIR/<folder>; CODE_DIR defaults to ~/code_folder
 """
 
 import curses
@@ -14,7 +14,7 @@ import os
 import subprocess
 import sys
 
-CODE_DIR = os.path.expanduser("~/code_folder")
+CODE_DIR = os.path.expanduser(os.environ.get("CODE_DIR") or "~/code_folder")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -489,7 +489,7 @@ def main():
 
     cwd = os.path.join(CODE_DIR, result)
 
-    # Match homelab_project convention: attach if exists, else create new
+    # Session name == folder name: attach if it exists, else create it
     try:
         subprocess.check_call(
             ["tmux", "has-session", "-t", result],

@@ -3,16 +3,21 @@
 #
 # Args: <session_name> <pane_current_path>
 #
-# Resolves the project root by preferring ~/code_folder/<session> (the naming
-# convention used by nav_tui.py: session name == folder name). Falls back to the
-# pane's current path for ad-hoc sessions created outside code_folder.
+# Resolves the project root by preferring $CODE_DIR/<session> (the naming
+# convention used by nav_tui.py: session name == folder name), where CODE_DIR
+# defaults to ~/code_folder. Falls back to the pane's current path for ad-hoc
+# sessions created outside it.
 #
 # Invoked from tmux via display-popup; see the "Project notepad" bind in
 # ~/.config/tmux/tmux.conf.
 
+# Resolve this script's directory up front: $0 may be relative to the caller's
+# cwd (and we cd into the project below), or may be a symlink into ~/.local/bin.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+
 session="$1"
 pane_path="$2"
-code="$HOME/code_folder"
+code="${CODE_DIR:-$HOME/code_folder}"
 
 if [ -n "$session" ] && [ -d "$code/$session" ]; then
     root="$code/$session"
@@ -58,8 +63,7 @@ cd "$root" 2>/dev/null || true
 # binding) and startup stays fast. Your normal nvim setup is unaffected.
 #
 # All notepad behaviour (keymaps, checkbox helpers) lives in notepad.lua next to
-# this script; it's loaded by absolute path so cwd doesn't matter.
+# this script, loaded by the absolute path resolved above.
 #   Alt+n → save and close        Alt+c → new checkbox
 #   Esc   → discard and close     Alt+x → toggle checkbox  (/c also inserts one)
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec nvim --clean -c "luafile $script_dir/notepad.lua" "$note"
