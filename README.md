@@ -109,8 +109,9 @@ taken by a session rooted somewhere else does it fall back to the qualified
 
 Right-clicking the background gives the same menu without the per-card
 entries, which is the shortest path to a new folder or the settings panel.
-Hover-to-select can be switched off if you would rather the keyboard kept the
-selection where it put it.
+Right-clicking a different card while the menu is open moves the menu there
+rather than making you dismiss it first. Hover-to-select can be switched off if
+you would rather the keyboard kept the selection where it put it.
 
 ### Closing sessions
 

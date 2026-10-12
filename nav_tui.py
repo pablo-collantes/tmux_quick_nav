@@ -559,7 +559,14 @@ class NavTUI:
         terminal can report Shift+Enter (CSI 13;2u, or ESC CR from a terminal
         keybinding) all reach curses as a bare ESC followed by the rest of the
         sequence, so we collect and decode them here.
+
+        This is also where the frame reaches the terminal. Everything draws into
+        the virtual screen with noutrefresh and is flushed in one update here,
+        just before we block — refreshing per panel instead paints the screen
+        without the menu and then puts the menu back, which is twenty times the
+        output for a highlight that moved one row, and shows as flicker.
         """
+        curses.doupdate()
         ch = self.stdscr.getch()
         if ch != 27:
             return ch
@@ -586,6 +593,42 @@ class NavTUI:
         finally:
             self.stdscr.timeout(-1)
         return "".join(out)
+
+    def _mouse_event(self):
+        """The newest mouse report, dropping any plain moves queued behind it.
+
+        Motion reporting sends one report per cell the pointer crosses, and
+        ncurses hands them back as a FIFO — so a flick down a menu arrives as a
+        run of twenty stale positions. Acting on each in turn draws twenty
+        frames the eye never sees and leaves the highlight trailing the pointer
+        by however far it has moved since. Only plain moves are dropped; a
+        button event is pushed back rather than swallowed by a move.
+        """
+        try:
+            event = curses.getmouse()
+        except curses.error:
+            return None
+        while (event[4] & curses.REPORT_MOUSE_POSITION
+               and not event[4] & curses.ALL_MOUSE_EVENTS):
+            self.stdscr.timeout(0)
+            try:
+                ch = self.stdscr.getch()
+            finally:
+                self.stdscr.timeout(-1)
+            if ch == -1:
+                break
+            if ch != curses.KEY_MOUSE:
+                curses.ungetch(ch)
+                break
+            try:
+                nxt = curses.getmouse()
+            except curses.error:
+                break
+            if nxt[4] & curses.ALL_MOUSE_EVENTS:
+                curses.ungetmouse(*nxt)
+                break
+            event = nxt
+        return event
 
     # ── layout helpers ───────────────────────────────────────────────────
 
@@ -693,7 +736,7 @@ class NavTUI:
             pass
 
         self._draw_help(max_y, max_x)
-        self.stdscr.refresh()
+        self.stdscr.noutrefresh()
 
     def _draw_help(self, max_y, max_x):
         sel = self.filtered[self.selected] if self.filtered else None
@@ -892,7 +935,7 @@ class NavTUI:
 
         self._draw_key_bar([("Enter", "Create"), ("Esc", "Cancel")], max_y, max_x)
 
-        self.stdscr.refresh()
+        self.stdscr.noutrefresh()
 
     def new_dir_prompt(self):
         """Show input prompt for new directory name. Returns name or None."""
@@ -903,7 +946,14 @@ class NavTUI:
             self._draw_new_dir_prompt(name, error)
             key = self._read_key()
 
-            if key in (KEY_IGNORE, curses.KEY_MOUSE):
+            if key == curses.KEY_MOUSE:
+                # Read it even though the prompt ignores it: ncurses queues the
+                # reports, so one left unread puts every later getmouse() one
+                # event behind for the rest of the session.
+                self._mouse_event()
+                continue
+
+            elif key == KEY_IGNORE:
                 continue
 
             elif key == 27:  # Esc
@@ -977,7 +1027,7 @@ class NavTUI:
             [("↑↓", "Move", 1), ("←→", "Change", 1), ("Esc", "Close", 0)],
             max_y, max_x,
         )
-        self.stdscr.refresh()
+        self.stdscr.noutrefresh()
         return y, x, w, h
 
     def _cycle_setting(self, index, delta):
@@ -1017,11 +1067,11 @@ class NavTUI:
                 self._cycle_setting(sel, -1)
             elif key in (curses.KEY_RIGHT, 32) or key in ENTER_KEYS:
                 self._cycle_setting(sel, 1)
-            elif key == curses.KEY_MOUSE and geom:
-                try:
-                    _, mx, my, _, bstate = curses.getmouse()
-                except curses.error:
+            elif key == curses.KEY_MOUSE:
+                event = self._mouse_event()
+                if event is None or not geom:
                     continue
+                _, mx, my, _, bstate = event
                 y, x, w, _ = geom
                 row = my - (y + 2)
                 inside = x <= mx < x + w and 0 <= row < len(SETTINGS_SPEC)
@@ -1086,7 +1136,7 @@ class NavTUI:
             [("↑↓", "Move", 1), ("Enter", "Choose", 0), ("Esc", "Close", 0)],
             max_y, max_x,
         )
-        self.stdscr.refresh()
+        self.stdscr.noutrefresh()
         return y, x, w, h
 
     def context_menu(self, idx, my, mx):
@@ -1113,10 +1163,10 @@ class NavTUI:
             if key in ENTER_KEYS or key == KEY_SHIFT_ENTER:
                 return self._menu_action(items[sel][1], idx)
             if key == curses.KEY_MOUSE:
-                try:
-                    _, mcx, mcy, _, bstate = curses.getmouse()
-                except curses.error:
+                event = self._mouse_event()
+                if event is None:
                     continue
+                _, mcx, mcy, _, bstate = event
                 y, x, w, _ = geom
                 row = mcy - (y + 1)
                 inside = x <= mcx < x + w and 0 <= row < len(items)
@@ -1124,6 +1174,13 @@ class NavTUI:
                     sel = row
                     if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
                         return self._menu_action(items[sel][1], idx)
+                elif bstate & (curses.BUTTON3_PRESSED | curses.BUTTON3_CLICKED):
+                    # Right-clicking another card moves the menu to it, rather
+                    # than making you dismiss this one first.
+                    idx = self._card_at(mcy, mcx)
+                    if idx is not None:
+                        self.selected = idx
+                    items, sel, my, mx = self._menu_items(idx), 0, mcy, mcx
                 elif bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
                     return None         # a click outside dismisses it
                 continue
@@ -1186,7 +1243,7 @@ class NavTUI:
                 [("←→", "Choose", 1), ("Enter", "Confirm", 0), ("Esc", "Cancel", 0)],
                 max_y, max_x,
             )
-            self.stdscr.refresh()
+            self.stdscr.noutrefresh()
 
             key = self._read_key()
             if key in (KEY_IGNORE, curses.KEY_RESIZE):
@@ -1202,10 +1259,10 @@ class NavTUI:
             elif key in (ord("n"), ord("N")):
                 return False
             elif key == curses.KEY_MOUSE:
-                try:
-                    _, mx, my, _, bstate = curses.getmouse()
-                except curses.error:
+                event = self._mouse_event()
+                if event is None:
                     continue
+                _, mx, my, _, bstate = event
                 hit = next((i for a, b, i in spans if my == y + 4 and a <= mx < b), None)
                 if hit is not None:
                     sel = hit
@@ -1227,10 +1284,10 @@ class NavTUI:
         return self._target(name)
 
     def _handle_mouse(self):
-        try:
-            _, mx, my, _, bstate = curses.getmouse()
-        except curses.error:
+        event = self._mouse_event()
+        if event is None:
             return None
+        _, mx, my, _, bstate = event
         idx = self._card_at(my, mx)
 
         if bstate & (curses.BUTTON3_PRESSED | curses.BUTTON3_CLICKED):
@@ -1400,6 +1457,16 @@ def app(stdscr):
     curses.curs_set(0)
     curses.set_escdelay(25)
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    # How long ncurses sits on a button press waiting to see whether a release
+    # turns it into a click. The default is a sixth of a second, and it is spent
+    # on every single click: measured at 167ms before the event reached us, which
+    # was most of what a click in here felt like. Five is enough to still pair a
+    # press with its release, and short enough not to be felt.
+    #
+    # Not zero: that switches click resolution off altogether, and ncurses then
+    # drops the release when both arrive in one read, and reports them in the
+    # wrong order when they do not.
+    curses.mouseinterval(5)
     stdscr.keypad(True)
     allow_ctrl_s()
 
