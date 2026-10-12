@@ -18,6 +18,7 @@
 set -uo pipefail
 
 CODE_DIR="${CODE_DIR:-$HOME/code_folder}"
+CONTAINERS="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-quick-nav/containers"
 
 mode="root"
 [[ ${1:-} == "--pane" ]] && mode="pane"
@@ -62,11 +63,33 @@ if [[ $mode == "pane" ]]; then
   exit 0
 fi
 
+# A folder flagged as a container in nav_tui.py (^F) groups projects rather
+# than being one, so the project root sits a level deeper inside it.
+is_container() {
+  local line
+  [[ -f $CONTAINERS ]] || return 1
+  while IFS= read -r line; do
+    [[ -z $line || $line == \#* ]] && continue
+    [[ $line == "$1" ]] && return 0
+  done < "$CONTAINERS"
+  return 1
+}
+
 # Inside ~/code_folder the top-level folder is the project -- that is the
-# convention nav_tui.py creates sessions with (session name == folder name).
+# convention nav_tui.py creates sessions with (session name == folder name) --
+# unless it is a container, in which case descend until it is not.
 if [[ $path == "$CODE_DIR"/* ]]; then
   rest=${path#"$CODE_DIR"/}
-  printf '%s/%s\n' "$CODE_DIR" "${rest%%/*}"
+  proj=""
+  while :; do
+    proj="${proj:+$proj/}${rest%%/*}"
+    if [[ $rest == */* ]] && is_container "$proj"; then
+      rest=${rest#*/}
+    else
+      break
+    fi
+  done
+  printf '%s/%s\n' "$CODE_DIR" "$proj"
   exit 0
 fi
 
